@@ -26,6 +26,7 @@ RA_FWDIR="$FWDIR/RA_bootloader_updater"
 BATCTRL="$RA_FWDIR/linux_host_tools/BatCtrl"
 
 BOOT_ID=045b:0261       # Renesas RA USB Boot - the MCU's factory boot ROM
+BL_ID=28de:1004         # Valve bootloader - where reading flash over USB happens
 CTRL_ID=28de:1205       # Valve Steam Controller - normal firmware
 
 MODE=ask                # ask | firmware | full | detect
@@ -198,23 +199,11 @@ else
     fi
 fi
 
-# ------------------------------------------------------------------- usb dump
-echo "------------------------------------------------------------------------"
-echo " Reading the controller over USB"
-echo "------------------------------------------------------------------------"
-$PY "$LIB/dump_usb.py" --outdir "$WORKDIR"
-usb_rc=$?
-if [ $usb_rc -ne 0 ]; then
-    echo
-    echo "The USB dump did not complete (exit $usb_rc)."
-    echo "Whatever it managed to read is kept and packed below."
-fi
-
-# ------------------------------------------------------------------- rom dump
-# Completing the boot ROM handshake is what keeps the ROM alive: it then waits
-# in an infinite loop rather than resetting, so the board stays at $BOOT_ID
-# until its power is cut. This trap is therefore not housekeeping - without it
-# the controller stays dead to SteamOS.
+# --------------------------------------------------------------- rom recovery
+# Completing the boot ROM handshake is what keeps the ROM alive: per R01AN5562
+# it then waits in an infinite loop rather than resetting, so the board stays
+# at $BOOT_ID until its power is cut. Cutting it is the whole recovery, and it
+# touches no flash - it is the same call Valve's own rfp_cli_linux.sh makes.
 release_board() {
     "$BATCTRL" SetCBPower 1 >/dev/null 2>&1     # never leave it unpowered
     lsusb -d "$BOOT_ID" >/dev/null 2>&1 || return 0
@@ -244,10 +233,62 @@ The controller has not re-enumerated as $CTRL_ID.
 Nothing was written to it - these tools cannot erase or write - so the
 firmware is intact. Release the buttons and run:
 
-    sudo $HERE/lib/exit-boot-mode.sh
+    sudo $HERE/rescue.sh
 EOF
 }
 
+# ------------------------------------------------------ restore on the way out
+# From here on the controller can be left in a mode where it is not running its
+# normal firmware, and it stays there until told to leave. An interrupted run
+# never gets to tell it, so that job belongs to a trap, not to the happy path.
+# Both modes are covered: the Valve bootloader, entered to read flash over USB,
+# and the Renesas boot ROM, entered for the bootloader pass on RA4.
+RESTORED=0
+restore_controller() {
+    [ "$RESTORED" = "1" ] && return 0    # do not prompt twice on Ctrl-C
+    RESTORED=1
+    if lsusb -d "$BL_ID" >/dev/null 2>&1; then
+        echo
+        echo "---- Returning the controller to its firmware --------------------------"
+        $PY "$LIB/exit_bootloader.py" || true
+    fi
+    if lsusb -d "$BOOT_ID" >/dev/null 2>&1; then
+        release_board
+    fi
+}
+
+interrupted() {
+    cat <<EOF
+
+------------------------------------------------------------------------
+Interrupted. Nothing was written to the controller.
+
+Whatever had been read is kept, unpacked, in:
+    $WORKDIR
+and the session log so far is:
+    $LOGFILE
+
+If the controller has stopped working, run:
+    $HERE/rescue.sh
+EOF
+}
+
+# ------------------------------------------------------------------- usb dump
+echo "------------------------------------------------------------------------"
+echo " Reading the controller over USB"
+echo "------------------------------------------------------------------------"
+trap restore_controller EXIT
+trap 'restore_controller; interrupted; exit 130' INT TERM
+$PY "$LIB/dump_usb.py" --outdir "$WORKDIR"
+usb_rc=$?
+if [ $usb_rc -ne 0 ]; then
+    echo
+    echo "The USB dump did not complete (exit $usb_rc)."
+    echo "Whatever it managed to read is kept and packed below."
+    echo "If the controller stops working, run:  ./rescue.sh"
+fi
+
+# ------------------------------------------------------------------- rom dump
 if [ "$DO_ROM" = "1" ]; then
     if [ ! -x "$BATCTRL" ]; then
         echo
@@ -271,7 +312,6 @@ resets itself out of boot mode after about 3 seconds, so hold throughout.
 
 EOF
         read -r -p "Holding all three? Press Enter to begin (Ctrl-C to skip) " _
-        trap release_board EXIT
 
         echo
         echo "---- Starting the dumper in watch mode ---------------------------------"
@@ -328,7 +368,6 @@ EOF
         fi
 
         release_board
-        trap - EXIT
     fi
 fi
 

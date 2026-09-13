@@ -8,23 +8,54 @@ the Deck are left exactly as they were found.
 
 ## Running it
 
-On the Steam Deck, in Desktop Mode, open Konsole and run:
+### First: set a password for the `deck` user
+
+SteamOS ships with **no password** on the `deck` account. Reading the
+controller needs administrator access, and `sudo` cannot work until a password
+exists, so do this before anything else.
+
+Switch to Desktop Mode (**Steam button → Power → Switch to Desktop**), open
+**Konsole** from the taskbar or the application menu, and run:
 
 ```
-git clone https://github.com/<owner>/steamdeck-controller-collect.git
+passwd
+```
+
+Three things to know about it:
+
+- **It does not show anything as you type.** No dots, no asterisks, no moving
+  cursor. That is normal and it is not frozen — type the password and press
+  Enter.
+- **It asks twice**, to catch typos. Type the same thing both times.
+- **Remember it.** You will need it every time you use `sudo`, and after
+  updates or a reinstall you may have to set it again. There is no "forgot
+  password" on a Deck; recovering from a lost one means a reimage. Write it
+  down somewhere you trust.
+
+If you have set one before and cannot remember it, run `passwd` again — as the
+`deck` user you can change your own password without knowing the old one.
+
+### Then: clone and run
+
+Still in Konsole:
+
+```
+git clone https://github.com/syberphunk/steamdeck-controller-collect.git
 cd steamdeck-controller-collect
 ./collect.sh
 ```
 
-It asks for your password, identifies the controller, tells you what can be
-captured from it, asks what to collect, does it, and prints the path of the
-finished archive in your home folder.
+`git` is already on SteamOS; nothing needs installing. If `git clone` fails
+because you are offline, you can instead download the ZIP from the GitHub page,
+extract it in Dolphin, then `cd` into the extracted folder and run
+`chmod +x collect.sh rescue.sh` before `./collect.sh`.
 
-### If it says the account has no password
+`collect.sh` asks for the password you just set (again showing nothing as you
+type), identifies the controller, tells you what can be captured from it, asks
+what to collect, does it, and prints the path of the finished archive in your
+home folder.
 
-SteamOS ships with no password on the `deck` account, so `sudo` cannot be used
-until one is set. Run `passwd`, enter a new password twice (nothing appears on
-screen as you type), then run `./collect.sh` again.
+Leave the Deck plugged in and do not let it sleep while it runs.
 
 ### Options
 
@@ -54,8 +85,35 @@ needs you to hold the buttons for the duration. Declining still captures the
 application firmware and data flash.
 
 The controller stops responding during the boot-ROM pass and is handed back
-automatically at the end. If something interrupts the script, run
-`sudo lib/exit-boot-mode.sh` to return it.
+automatically at the end.
+
+## If the controller stops working
+
+Run:
+
+```
+./rescue.sh
+```
+
+**The controller is not bricked.** Reading its flash means putting it into a
+mode where it is not running its normal firmware, and it stays in that mode
+until something tells it to leave — an interrupted run never gets to tell it.
+Nothing has been erased or written: the dumpers have no code path that can,
+and they check that about themselves before opening the device.
+
+`collect.sh` already does this for you on the way out, including on Ctrl-C.
+`rescue.sh` is for when that could not run — a closed terminal, a killed
+process, a crash — and for anyone who would rather just run something. It
+handles both stuck modes:
+
+| | |
+|---|---|
+| `28de:1004` Valve bootloader | left by an interrupted USB dump; ends with one command over USB |
+| `045b:0261` RA USB Boot | left by an interrupted boot-ROM pass; ends with a power cycle of the controller board |
+
+It is safe to run at any time. If nothing is wrong it says so and stops.
+If it cannot fix things, reboot the Deck — that re-runs the normal controller
+bring-up from scratch and clears nearly everything software cannot.
 
 ## What you get
 
@@ -84,6 +142,7 @@ Inside:
 | `*-full-flash.bin` | the whole flash as read, before being carved up |
 | `manifest.json` | everything above in full, with SHA-256 hashes |
 | `README.txt` | a plain-text summary of this capture |
+| `collect-log.txt` | everything the script printed, and what you answered |
 | `*-log.txt` | console output of each stage, as it happened |
 
 Regions the controller refuses are recorded as refusals in `manifest.json`
@@ -107,3 +166,8 @@ The dumpers refuse to start if their own source contains a call to any
 erase or write routine, and the boot-ROM dumper additionally refuses any
 command outside inquiry, read, signature and area queries. This is checked at
 runtime, on every run, against the files on disk.
+
+## License
+
+MIT — see [LICENSE](LICENSE). `lib/vendor/serial/` is pySerial 3.5 under
+BSD-3-Clause; see [lib/vendor/README.md](lib/vendor/README.md).
