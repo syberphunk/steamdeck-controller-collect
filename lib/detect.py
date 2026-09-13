@@ -60,19 +60,25 @@ def app_build_timestamps():
 
 
 def plan_for(major):
-    """What can be captured for this type, and what it costs the operator."""
+    """What can be captured for this type, and what it costs the operator.
+
+    Everything here happens over USB - the controller is wired to the Deck as
+    an internal USB device, and so is the boot ROM. What differs between board
+    families is how many passes it takes and whether the operator has to hold
+    buttons, which is what these summaries describe.
+    """
     if major == 3:
         return {
             'usb_dump': True,
             'rom_dump': True,
             'bootloader_from': 'rom',
             'summary': [
-                'Application firmware and data flash come off over USB, '
-                'unattended.',
-                'The bootloader region (0x0-0x8000) is refused over USB on '
-                'this board.',
-                'Capturing it needs the Renesas ROM boot mode, which means '
-                'holding three buttons.',
+                'Application firmware and data flash: one pass, unattended.',
+                'The bootloader (0x0-0x8000) takes a second pass. The '
+                'controller will not hand that region to its normal firmware '
+                'interface, only to the built-in boot ROM in the chip.',
+                'Starting that boot ROM means holding three buttons while the '
+                'controller board is restarted.',
             ],
         }
     return {
@@ -80,8 +86,8 @@ def plan_for(major):
         'rom_dump': False,
         'bootloader_from': 'usb',
         'summary': [
-            'Bootloader, application firmware and identity blocks all come '
-            'off over USB.',
+            'Bootloader, application firmware and identity blocks: one pass, '
+            'all of it.',
             'Unattended - nothing to hold, nothing to press.',
         ],
     }

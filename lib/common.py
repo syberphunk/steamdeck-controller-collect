@@ -161,15 +161,23 @@ def layout_for(major, legacy_pid=False):
 
 
 def identify(major, hwid, dmi_board):
-    """(board description, primary chip, secondary chip). Never guesses silently."""
+    """(board description, primary chip, secondary chip). Never guesses silently.
+
+    `hwid` is None before anything has read the device-info partition, which
+    only comes back during the capture pass - detection on its own does not
+    put the controller into a mode where it can be asked. Say so rather than
+    printing a bare "None" at the operator.
+    """
     known = HWID_BOARDS.get(hwid)
+    hwid_note = (f'hardware ID {hwid}' if hwid is not None
+                 else 'hardware ID not read yet')
     # Accept the table entry only if its chip family agrees with the USB type;
     # a mismatch means the ID has been reused and the table would mislead.
     if known and (major != 3) == (known[1] != 'ra4e1'):
         return known
 
     if major == 3:
-        board = f'Renesas RA4 controller board, hardware ID {hwid}'
+        board = f'Renesas RA4 controller board, {hwid_note}'
         if dmi_board:
             board += f', in a {dmi_board}-class Deck'
         return board, 'ra4e1', None
@@ -179,6 +187,9 @@ def identify(major, hwid, dmi_board):
 
     generic = {1: 'SAMD21 + SAMD21', 2: 'SAMD21 + SAMD20 or SAMD21'}.get(
         major, 'unknown')
+    if hwid is None:
+        return (f'Type {major} board ({generic}), {hwid_note}',
+                'samd21', 'samd21' if major == 1 else 'samdxx')
     return (f'unrecorded hardware ID {hwid} on a Type {major} board '
             f'({generic}) - please report this',
             'samd21', 'samd21' if major == 1 else 'samdxx')
@@ -187,10 +198,14 @@ def identify(major, hwid, dmi_board):
 def bootloader_source(major):
     """Where the bootloader region can be read from, for this type.
 
-    SAMD parts serve 0x0 upward over Valve's debug-read path, so one USB pass
-    captures bootloader and application together. The RA4 refuses 0x0-0x8000
-    over USB; its bootloader is only readable through the Renesas ROM boot
-    mode, which needs a physical button combination.
+    Both answers are over USB - the controller is an internal USB device and
+    the Renesas boot ROM enumerates as one too. The difference is which
+    interface will serve 0x0 upward.
+
+    SAMD parts serve it on Valve's debug-read path, so one pass captures
+    bootloader and application together. The RA4 refuses 0x0-0x8000 there; its
+    bootloader is only readable from the chip's own boot ROM, entered with a
+    physical button combination, which is a second attended pass.
     """
     if major == 3:
         return 'rom'

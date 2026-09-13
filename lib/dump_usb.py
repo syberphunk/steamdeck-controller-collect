@@ -713,7 +713,7 @@ def assessment(records):
     if any(r['verdict'] == 'bootloader captured' for r in got):
         bits.append('bootloader region included')
     if any(r['verdict'].startswith('app only') for r in got):
-        bits.append('bootloader region refused over USB')
+        bits.append('bootloader region not served by this interface')
     missing = sum(n for r in got for _, n in r.get('gaps', []))
     if missing:
         bits.append(f'{missing:,} bytes not captured')

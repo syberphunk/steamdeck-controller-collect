@@ -163,15 +163,16 @@ if [ "$BL_SOURCE" = "rom" ]; then
   ----------------------
 
     1) Firmware only                                    (about 5 minutes)
-       Application firmware, data flash and identity blocks, over USB.
-       Nothing to hold. You can leave it running.
+       Application firmware, data flash and identity blocks.
+       One pass. Nothing to hold. You can leave it running.
 
     2) Firmware AND bootloader                          (about 10 minutes)
-       Everything in option 1, then a second pass through the MCU's boot
-       ROM to reach the bootloader region, which this board will not serve
-       over USB.
+       Everything in option 1, then a second pass to read the bootloader.
+       The controller will not hand that region to its normal firmware
+       interface - only the chip's built-in boot ROM will, and starting
+       that means restarting the controller board with buttons held.
 
-       For this you must hold three buttons for the whole second pass:
+       So for the second pass you must hold three buttons throughout:
            Right Bumper (R1)
            Right Upper Back (R4)
            Right Quick Access (the "..." button)
@@ -189,10 +190,10 @@ EOF
             ;;
     esac
 else
-    # SAMD boards serve the bootloader over USB, so one pass gets everything.
+    # SAMD boards hand over the bootloader region too, so one pass gets the lot.
     if [ "$MODE" = "ask" ]; then
-        echo "  This board serves its bootloader over USB, so one pass collects"
-        echo "  everything. Nothing to hold."
+        echo "  This board hands over its bootloader as well, so one pass"
+        echo "  collects everything. Nothing to hold."
         echo
         read -r -p "  Press Enter to begin (Ctrl-C to cancel) " _ || true
         echo

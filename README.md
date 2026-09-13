@@ -68,21 +68,24 @@ Leave the Deck plugged in and do not let it sleep while it runs.
 
 ## What gets captured
 
-Which regions are reachable depends on the controller board, and the script
-works this out before asking anything.
+The controller is wired into the Deck as an internal USB device, so all of
+this happens over USB — including the boot-ROM pass below. What differs
+between boards is **how many passes it takes, and whether you have to hold
+buttons.** The script works that out before asking anything.
 
 **SAMD boards** (Steam Deck LCD, and OLED units built on the older controller)
-serve their whole flash over USB. One unattended pass gets the bootloader,
-the application firmware, the device-info partition and the per-unit blob,
-from both the right-hand and left-hand boards.
+hand over their whole flash when asked. One unattended pass gets the
+bootloader, the application firmware, the device-info partition and the
+per-unit blob, from both the right-hand and left-hand boards.
 
-**RA4 boards** (Renesas RA4E1, a single board rather than two) refuse to serve
-`0x0`–`0x8000` over USB, so the bootloader cannot be read that way. Reaching
-it means a second pass through the MCU's own boot ROM, entered by holding
-three buttons — Right Bumper, Right Upper Back and Right Quick Access — while
-the board's power is cycled. The script offers this as a choice, because it
-needs you to hold the buttons for the duration. Declining still captures the
-application firmware and data flash.
+**RA4 boards** (Renesas RA4E1, a single board rather than two) will not hand
+over `0x0`–`0x8000` — the bootloader — to the interface their firmware
+provides. That region is only served by the separate boot ROM built into the
+chip, and starting it means restarting the controller board while three
+buttons are held: Right Bumper, Right Upper Back and Right Quick Access. That
+is a second pass, and the script offers it as a choice because it needs you
+there holding them. Declining still captures the application firmware and data
+flash.
 
 The controller stops responding during the boot-ROM pass and is handed back
 automatically at the end.
@@ -108,8 +111,8 @@ handles both stuck modes:
 
 | | |
 |---|---|
-| `28de:1004` Valve bootloader | left by an interrupted USB dump; ends with one command over USB |
-| `045b:0261` RA USB Boot | left by an interrupted boot-ROM pass; ends with a power cycle of the controller board |
+| `28de:1004` Valve bootloader | left by an interrupted first pass; ends with one command |
+| `045b:0261` RA USB Boot | left by an interrupted boot-ROM pass; ends with a restart of the controller board |
 
 It is safe to run at any time. If nothing is wrong it says so and stops.
 If it cannot fix things, reboot the Deck — that re-runs the normal controller
@@ -134,8 +137,8 @@ Inside:
 | | |
 |---|---|
 | `*-app.bin` | application firmware |
-| `*-bootloader-*.bin` | bootloader, read over USB |
-| `*-rom-bootloader-*.bin` | bootloader, read through the boot ROM |
+| `*-bootloader-*.bin` | bootloader, read in the normal pass |
+| `*-rom-bootloader-*.bin` | bootloader, read through the chip's boot ROM |
 | `*-dataflash.bin` | per-unit factory data |
 | `*-devinfo.bin` | device-info partition: hardware ID, serials, build stamp |
 | `*-unit-blob.bin` | per-unit calibration blob |
