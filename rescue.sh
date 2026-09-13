@@ -137,12 +137,31 @@ echo "------------------------------------------------------------------------"
 report_state
 
 if app_present && ! boot_present && ! on_bus "$ROM_ID"; then
-    if [ "$did_something" = "0" ]; then
-        echo "Nothing was wrong - the controller was already running normally."
+    # Everything this script can see is a USB state, and every USB state here
+    # is correct. That is NOT the same as the controller working: after a
+    # boot-mode pass the board drops off the bus and comes back, and Steam does
+    # not always re-attach to it. The controller is then present, running its
+    # own firmware, and dead to the user. Saying "nothing was wrong" at someone
+    # holding a dead controller is worse than saying nothing, so say which
+    # layer is confirmed good and where to look next.
+    if [ "$did_something" = "1" ]; then
+        echo "Recovered - the controller is running its own firmware again."
     else
-        echo "Recovered. SteamOS will pick the controller up within a second"
-        echo "or two; restart Steam if it does not."
+        echo "There was nothing for this script to fix: the controller is on the"
+        echo "bus and running its own firmware, not stuck in any dump mode."
     fi
+    cat <<'EOF'
+
+If it still does not respond - Steam sees no controller, the sticks and
+buttons do nothing - then the controller is fine and Steam has simply not
+re-attached to it. That is a Steam-side problem, and this script cannot
+reach it. In order:
+
+  1. Close Steam completely and reopen it.
+  2. Reboot the Deck. This is known to clear it.
+
+Nothing has been erased or written either way.
+EOF
     exit 0
 fi
 

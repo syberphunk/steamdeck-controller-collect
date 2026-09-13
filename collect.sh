@@ -187,6 +187,28 @@ EOF
                 *) DO_ROM=0 ;;
             esac
             echo
+            # The buttons come minutes later, at the start of the second pass.
+            # Without saying so, the button instructions above read as
+            # something to do now, and the first pass looks like the script
+            # ignoring them.
+            if [ "$DO_ROM" = "1" ]; then
+                cat <<'EOF'
+  The order this happens in
+  -------------------------
+
+    Now      Pass 1, about 5 minutes. Unattended. DO NOT hold anything
+             yet - just leave it alone until it finishes.
+
+             During this pass the controller will refuse to hand over the
+             bootloader region. That is expected, it is not a fault, and
+             it is the whole reason there is a second pass.
+
+    Then     The script stops and waits for you, and only then do you
+             hold the three buttons. Nothing happens until you press
+             Enter at that prompt.
+
+EOF
+            fi
             ;;
     esac
 else
@@ -211,22 +233,53 @@ release_board() {
 
     echo
     echo "---- Returning the controller to normal --------------------------------"
-    echo "RELEASE ALL THREE BUTTONS NOW - holding them re-enters boot mode."
-    read -r -t 10 -p "Buttons released? Press Enter (continuing in 10s) " _ || true
+    # This step succeeds or fails on whether a human has physically let go, so
+    # it waits for one. It used to continue after ten seconds regardless, which
+    # power-cycled a board whose buttons were still held - putting it straight
+    # back into boot mode, the exact state being undone. The timeout that
+    # remains is only so an unattended --full run cannot hang forever.
+    cat <<'EOF'
+The bootloader pass is finished.
+
+TAKE YOUR HANDS OFF THE CONTROLLER NOW.
+
+Holding any of R1, R4 or the "..." button through the power cycle puts the
+board back into boot mode. This waits for you - it will not go on by itself.
+
+EOF
+    read -r -t 300 -p "All three released? Press Enter " _ || true
     echo
 
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
         "$BATCTRL" SetCBPower 0 >/dev/null 2>&1
         sleep 1
         "$BATCTRL" SetCBPower 1 >/dev/null 2>&1
-        for _ in $(seq 1 80); do                # up to 8 s to re-enumerate
+        for _ in $(seq 1 100); do               # up to 10 s to re-enumerate
             if lsusb -d "$CTRL_ID" >/dev/null 2>&1; then
-                echo "Controller is back ($CTRL_ID) - SteamOS will pick it up."
+                # Back on the bus running its own firmware. That is all that
+                # can be confirmed from here - Steam re-attaching to a device
+                # that dropped and returned is a separate matter, and it often
+                # does not, so do not promise it.
+                cat <<EOF
+Controller is back on the bus ($CTRL_ID), running its own firmware.
+
+If it does not respond once this finishes - no sticks, no buttons, Steam
+sees nothing - the controller is fine and Steam has just not re-attached
+to it after the board dropped off the bus. Close Steam and reopen it, or
+reboot the Deck. A reboot always clears it.
+EOF
                 return 0
             fi
             sleep 0.1
         done
-        echo "  attempt $attempt: not back yet; are the buttons still held?"
+        # Which failure this is matters: the board reappearing at $BOOT_ID is
+        # a button still being held, and saying so is more use than "not yet".
+        if lsusb -d "$BOOT_ID" >/dev/null 2>&1; then
+            echo "  attempt $attempt: it came back in boot mode, so a button is"
+            echo "               still held. Put the controller down entirely."
+        else
+            echo "  attempt $attempt: nothing on the bus yet, trying again."
+        fi
     done
 
     cat <<EOF

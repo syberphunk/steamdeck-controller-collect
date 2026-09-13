@@ -378,6 +378,36 @@ def open_targets(usb, notes):
     return [], major
 
 
+# --------------------------------------------------- known-unserved regions
+# Ranges a board family is known in advance not to serve on the interface its
+# own firmware provides. Presentation only - nothing here changes what is read
+# or what the manifest records. It exists so a run that goes exactly to plan
+# does not report itself in the language of failure.
+EXPECTED_UNSERVED = []
+
+
+def set_expected_unserved(major, lay):
+    EXPECTED_UNSERVED.clear()
+    if major != 3:
+        return
+    EXPECTED_UNSERVED.append((
+        lay['flash_start'], lay['app_start'],
+        'the bootloader, which only the boot ROM hands over'))
+    if lay['data_flash']:
+        start, end = lay['data_flash']
+        EXPECTED_UNSERVED.append((
+            start + 0x1000, end,
+            'the upper half of data flash, which this interface does not expose'))
+
+
+def expected_refusal(start, end):
+    """Why this range was always going to be refused, or None if unexpected."""
+    for s, e, why in EXPECTED_UNSERVED:
+        if start >= s and end <= e:
+            return why
+    return None
+
+
 # ---------------------------------------------------------- pre-flight probing
 def readable(backend, off):
     try:
@@ -439,8 +469,15 @@ def map_regions(backend, start, end, label):
         spans[i][0] = edge
 
     for s, e, ok in spans:
-        say(f'   {label} 0x{s:08X}-0x{e:08X}  '
-            f'{"readable" if ok else "REFUSED by the controller"}')
+        if ok:
+            note = 'readable'
+        else:
+            # A refusal that was predicted from the board type is the normal
+            # answer, not a fault. Shouting REFUSED at every one of them makes
+            # a textbook run look like a failing one.
+            why = expected_refusal(s, e)
+            note = f'not served here - {why}' if why else 'REFUSED by the controller'
+        say(f'   {label} 0x{s:08X}-0x{e:08X}  {note}')
     return [tuple(s) for s in spans]
 
 
@@ -712,11 +749,18 @@ def assessment(records):
     bits = [f'{len(got)} MCU(s) read']
     if any(r['verdict'] == 'bootloader captured' for r in got):
         bits.append('bootloader region included')
+    # This line is printed at the end of the USB pass, which on an RA4 is the
+    # first of two. Worded as a final tally it reads as a failed run when the
+    # bootloader is about to be collected by the pass that follows.
+    all_gaps = [g for r in got for g in r.get('gaps', [])]
+    missing = sum(n for _, n in all_gaps)
     if any(r['verdict'].startswith('app only') for r in got):
-        bits.append('bootloader region not served by this interface')
-    missing = sum(n for r in got for _, n in r.get('gaps', []))
+        bits.append('bootloader left for the boot-ROM pass')
     if missing:
-        bits.append(f'{missing:,} bytes not captured')
+        if all(expected_refusal(o, o + n) for o, n in all_gaps):
+            bits.append(f'{missing:,} bytes this interface does not serve')
+        else:
+            bits.append(f'{missing:,} bytes not captured')
     return 'Completed: ' + ', '.join(bits) + '.'
 
 
@@ -775,6 +819,7 @@ def main():
              '  * Reboot the Deck and try once more.')
 
     lay = layout_for(major, usb.get('legacy_pid', False))
+    set_expected_unserved(major, lay)
 
     records = []
     for b in targets:
@@ -881,10 +926,15 @@ def main():
 
         if gaps:
             missing = sum(n for _, n in gaps)
-            say(f'   -- {missing:,} bytes in {len(gaps)} range(s) were not '
-                f'captured.')
-            say('   -- Those are filled with 0xFF as a placeholder and listed')
-            say('   -- in the manifest.')
+            unexpected = [(o, n) for o, n in gaps
+                          if not expected_refusal(o, o + n)]
+            say(f'   -- {missing:,} bytes in {len(gaps)} range(s) were not read '
+                f'by this pass.')
+            if not unexpected:
+                say('   -- All of that is region this board was never going to')
+                say('   -- serve here, so nothing has gone wrong.')
+            say('   -- It is held as 0xFF and listed, range by range, in the')
+            say('   -- manifest, so a short read is never taken for erased flash.')
 
     # ---- hand the controller back ------------------------------------------
     say()

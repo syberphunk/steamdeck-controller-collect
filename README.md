@@ -114,9 +114,18 @@ handles both stuck modes:
 | `28de:1004` Valve bootloader | left by an interrupted first pass; ends with one command |
 | `045b:0261` RA USB Boot | left by an interrupted boot-ROM pass; ends with a restart of the controller board |
 
-It is safe to run at any time. If nothing is wrong it says so and stops.
-If it cannot fix things, reboot the Deck — that re-runs the normal controller
-bring-up from scratch and clears nearly everything software cannot.
+It is safe to run at any time.
+
+**If `rescue.sh` says the controller is already on the bus and running its own
+firmware, but it still does not respond** — no sticks, no buttons, Steam sees
+nothing — then the controller genuinely is fine and Steam has not re-attached
+to it. The bootloader pass makes the board drop off USB and come back, and
+Steam does not always follow it back. Close Steam and reopen it; if that does
+not do it, reboot the Deck. A reboot always clears it.
+
+That is a Steam-side re-attach, not a controller fault, and nothing in this
+toolchain can reach it — which is why the script tells you rather than
+pretending to fix it.
 
 ## What you get
 
