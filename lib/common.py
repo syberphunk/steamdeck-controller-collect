@@ -25,7 +25,7 @@ PID_BOOTLOADER_LEGACY = 0x1003
 RA_BOOT_VID = 0x045b
 RA_BOOT_PID = 0x0261
 
-COLLECTOR_VERSION = '1.0.0'
+COLLECTOR_VERSION = '1.0.1'
 
 
 # --------------------------------------------------------------- transcript
