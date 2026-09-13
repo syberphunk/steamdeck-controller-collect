@@ -849,7 +849,7 @@ def main():
             say('   >> bootloader region read, vector table looks valid.')
         elif not bl_readable:
             verdict = 'app only - bootloader region refused'
-            say('   >> the controller refused the bootloader region over USB.')
+            say('   >> this interface does not serve the bootloader region.')
         elif blank > 99:
             verdict = 'blank'
         else:
