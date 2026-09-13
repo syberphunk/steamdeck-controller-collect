@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# Captures. These hold the Deck's serial number, the controller board's serial
+# number and per-unit factory data - see PRIVACY.md. They belong to whoever
+# ran the tool, not in this repository.
+steamdeck-controller-*/
+steamdeck-controller-*.tar.gz
+*.bin
