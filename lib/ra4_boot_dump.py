@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 SCRIPT_VERSION = '2026-09-11'
 
-# The only command bytes this tool is permitted to transmit.
 ALLOWED_COMMANDS = {'INQ_CMD', 'REA_CMD', 'SIG_CMD', 'ARE_CMD'}
 FORBIDDEN_COMMANDS = {'ERA_CMD', 'WRI_CMD'}
 
@@ -71,8 +70,6 @@ def self_audit():
         if hasattr(packer, name):
             problems.append(f'{name} is defined in raboot/packer.py')
 
-    # Word-boundary guard so unpack_pkt() does not match, and a def guard so
-    # the definition of pack_pkt itself does not match its own parameter name.
     call = re.compile(r'(?<![\w.])(?<!def )pack_pkt\(\s*([A-Za-z_][A-Za-z0-9_]*)')
     for path in sources:
         with open(path, 'r') as fh:
@@ -125,8 +122,6 @@ def cmd_probe(args):
     hr()
     say('USB serial ports visible on this machine:')
     cands = list_candidate_ports()
-    # A Deck exposes ~30 legacy /dev/ttyS* with no VID at all. Listing them buries
-    # the one line that matters, so they are counted rather than named.
     usb = [c for c in cands if c['vid'] is not None]
     legacy = len(cands) - len(usb)
     if not usb:
@@ -142,7 +137,6 @@ def cmd_probe(args):
         say('Next: run   sudo python3 lib/ra4_boot_dump.py info')
         return 0
     if usb_device_present():
-        # On the bus but no tty - cdc_acm has not bound (yet).
         say(f'{VENDOR_ID:04x}:{PRODUCT_ID:04x} IS on the USB bus, but has no')
         say('serial port. cdc_acm has not bound to it.')
         say('Try again in a moment; if it persists, check "lsmod | grep cdc_acm".')
@@ -171,10 +165,6 @@ def open_device(args):
         say(f'  connected on {dev.port}')
         return dev
 
-    # The board holds boot mode for only ~3.3 s, so a single shot is a coin
-    # flip. Keep retrying for the whole wait window: the operator's partner
-    # process re-cycles power, and each cycle gives us another window. One
-    # button-holding session therefore buys many attempts rather than one.
     say(f'Waiting up to {args.wait:g}s for the board to enter boot mode...')
     say('(power will be cycled repeatedly; keep holding the buttons)')
     deadline = time.monotonic() + args.wait
@@ -199,8 +189,6 @@ def open_device(args):
             say(f'  attempt {attempt} failed: {str(err).splitlines()[0]}')
             if trace:
                 say(str(err))
-        # Let the dead node go away before looking again, otherwise we spin on
-        # a stale port that no longer has a device behind it.
         gone = time.monotonic() + 8
         while time.monotonic() < gone and usb_device_present():
             time.sleep(0.1)
@@ -227,8 +215,6 @@ def show_identity(dev):
     say(f"  max baud:          {sig['max_baud']:,} bps")
     say(f"  accessible areas:  {sig['num_areas']}")
 
-    # Ask for exactly as many areas as the device says it has. Assuming three
-    # missed the config area entirely on a real RA4E1, which has four.
     areas = dev.area_info(num_areas=sig['num_areas'])
     hr('-')
     say('Area information, as reported by the device:')
@@ -269,10 +255,6 @@ def cmd_dump(args):
     try:
         sig, areas = show_identity(dev)
 
-        # Take the regions from the device rather than from a hardcoded map.
-        # Code flash is reported as two areas that differ only in erase block
-        # size, so asking area_for(0x0) and trusting its EAD read just the
-        # first 64 KB of a 256 KB part and called it the whole code flash.
         spans = dev.regions_by_kind()
         label = {'user (code flash)': 'code-flash',
                  'data flash': 'data-flash',
@@ -280,9 +262,6 @@ def cmd_dump(args):
         wanted = []
         for k, lo, hi in spans:
             name = label.get(k, k.replace(' ', '-'))
-            # A kind can yield more than one span if the device splits it across
-            # an address gap. Keep the names unique so neither the results dict
-            # nor the written files silently overwrite each other.
             if any(w[0] == name for w in wanted):
                 name = f'{name}-0x{lo:08X}'
             wanted.append((name, lo, hi))
@@ -312,7 +291,6 @@ def cmd_dump(args):
                 say(f'    FAILED: {e}')
                 results[name] = {'status': 'failed', 'error': str(e)}
 
-        # The prize: the region Valve's bootloader will not serve.
         if 'code-flash.bin' in files and len(files['code-flash.bin']) >= 0x8000:
             bl = files['code-flash.bin'][:0x8000]
             files['bootloader-0x0-0x8000.bin'] = bl

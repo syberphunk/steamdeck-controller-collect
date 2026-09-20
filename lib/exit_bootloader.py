@@ -85,7 +85,6 @@ def reboot_d20(path, major):
             say('  [->] reboot sent to secondary-left')
             time.sleep(1)
         except Exception as exc:                                # noqa: BLE001
-            # Normal when only the primary was left in bootloader mode.
             say(f'  [--] secondary not in bootloader mode ({type(exc).__name__})')
 
     label = 'primary-single' if major == 3 else 'primary-right'
@@ -104,7 +103,6 @@ def main():
         say('This does not look like a Steam Deck.')
         return 3
 
-    # The audit covers every file under lib/, this one included.
     self_audit()
 
     usb = probe_usb()
@@ -127,8 +125,6 @@ def main():
     d20_path = os.path.join(FW_DIR, 'd20bootloader.py')
     d21_path = os.path.join(FW_DIR, 'd21bootloader16.py')
 
-    # Same rule the dumper uses: the major byte of the USB release number
-    # chooses the tool, with the other one as a fallback.
     attempts = []
     if major == 1 and os.path.exists(d21_path):
         attempts.append(('d21', d21_path))

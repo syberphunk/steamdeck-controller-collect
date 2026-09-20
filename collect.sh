@@ -43,7 +43,6 @@ done
 
 die() { echo; echo "ERROR: $*"; echo; exit 1; }
 
-# ---------------------------------------------------------------- environment
 if [ ! -d "$FWDIR" ]; then
     cat <<EOF
 
@@ -56,10 +55,6 @@ EOF
     exit 1
 fi
 
-# ------------------------------------------------------------------ privileges
-# Talking to the controller over USB, and to BatCtrl, both need root. On a
-# fresh SteamOS install the 'deck' user has no password at all, so sudo cannot
-# work until one is set - say so plainly rather than failing at a prompt.
 if [ "$(id -u)" -ne 0 ]; then
     if ! sudo -n true 2>/dev/null; then
         pwstate=$(passwd -S "$USER" 2>/dev/null | awk '{print $2}')
@@ -90,7 +85,6 @@ EOF
     exec sudo -- "$0" "$@"
 fi
 
-# Results belong to whoever invoked sudo, not to root.
 OWNER=${SUDO_USER:-}
 if [ -n "$OWNER" ]; then
     HOMEDIR=$(getent passwd "$OWNER" | cut -d: -f6)
@@ -102,18 +96,11 @@ fi
 WORKDIR="$HOMEDIR/.controller-collect-$$"
 mkdir -p "$WORKDIR" || die "could not create $WORKDIR"
 
-# Everything from here on is recorded, prompts and answers included, and the
-# record is copied into the archive just before it is packed. The log is kept
-# outside the working directory so it is not being written to while it is
-# being tarred.
 LOGFILE="$HOMEDIR/.controller-collect-$$.log"
 exec > >(tee -a "$LOGFILE") 2>&1
 
-# Stage output goes through a pipe now, so ask Python not to block-buffer it:
-# progress during a ten-minute dump should appear as it happens.
 PY="python3 -u"
 
-# ---------------------------------------------------------------------- detect
 echo "========================================================================"
 echo " Steam Deck controller firmware collection"
 echo "========================================================================"
@@ -138,8 +125,6 @@ EOF
     exit 1
 fi
 
-# What kind of board this is decides whether a second, hands-on pass is needed
-# to reach the bootloader.
 BL_SOURCE=$(python3 -c "
 import json,sys
 d=json.load(open('$WORKDIR/detect.json'))
@@ -151,7 +136,6 @@ if [ "$MODE" = "detect" ]; then
     exit 0
 fi
 
-# ----------------------------------------------------------------------- ask
 DO_ROM=0
 if [ "$BL_SOURCE" = "rom" ]; then
     case "$MODE" in
@@ -187,10 +171,6 @@ EOF
                 *) DO_ROM=0 ;;
             esac
             echo
-            # The buttons come minutes later, at the start of the second pass.
-            # Without saying so, the button instructions above read as
-            # something to do now, and the first pass looks like the script
-            # ignoring them.
             if [ "$DO_ROM" = "1" ]; then
                 cat <<'EOF'
   The order this happens in
@@ -212,7 +192,6 @@ EOF
             ;;
     esac
 else
-    # SAMD boards hand over the bootloader region too, so one pass gets the lot.
     if [ "$MODE" = "ask" ]; then
         echo "  This board hands over its bootloader as well, so one pass"
         echo "  collects everything. Nothing to hold."
@@ -222,22 +201,12 @@ else
     fi
 fi
 
-# --------------------------------------------------------------- rom recovery
-# Completing the boot ROM handshake is what keeps the ROM alive: per R01AN5562
-# it then waits in an infinite loop rather than resetting, so the board stays
-# at $BOOT_ID until its power is cut. Cutting it is the whole recovery, and it
-# touches no flash - it is the same call Valve's own rfp_cli_linux.sh makes.
 release_board() {
     "$BATCTRL" SetCBPower 1 >/dev/null 2>&1     # never leave it unpowered
     lsusb -d "$BOOT_ID" >/dev/null 2>&1 || return 0
 
     echo
     echo "---- Returning the controller to normal --------------------------------"
-    # This step succeeds or fails on whether a human has physically let go, so
-    # it waits for one. It used to continue after ten seconds regardless, which
-    # power-cycled a board whose buttons were still held - putting it straight
-    # back into boot mode, the exact state being undone. The timeout that
-    # remains is only so an unattended --full run cannot hang forever.
     cat <<'EOF'
 The bootloader pass is finished.
 
@@ -256,10 +225,6 @@ EOF
         "$BATCTRL" SetCBPower 1 >/dev/null 2>&1
         for _ in $(seq 1 100); do               # up to 10 s to re-enumerate
             if lsusb -d "$CTRL_ID" >/dev/null 2>&1; then
-                # Back on the bus running its own firmware. That is all that
-                # can be confirmed from here - Steam re-attaching to a device
-                # that dropped and returned is a separate matter, and it often
-                # does not, so do not promise it.
                 cat <<EOF
 Controller is back on the bus ($CTRL_ID), running its own firmware.
 
@@ -272,8 +237,6 @@ EOF
             fi
             sleep 0.1
         done
-        # Which failure this is matters: the board reappearing at $BOOT_ID is
-        # a button still being held, and saying so is more use than "not yet".
         if lsusb -d "$BOOT_ID" >/dev/null 2>&1; then
             echo "  attempt $attempt: it came back in boot mode, so a button is"
             echo "               still held. Put the controller down entirely."
@@ -291,12 +254,6 @@ firmware is intact. Release the buttons and run:
 EOF
 }
 
-# ------------------------------------------------------ restore on the way out
-# From here on the controller can be left in a mode where it is not running its
-# normal firmware, and it stays there until told to leave. An interrupted run
-# never gets to tell it, so that job belongs to a trap, not to the happy path.
-# Both modes are covered: the Valve bootloader, entered to read flash over USB,
-# and the Renesas boot ROM, entered for the bootloader pass on RA4.
 RESTORED=0
 restore_controller() {
     [ "$RESTORED" = "1" ] && return 0    # do not prompt twice on Ctrl-C
@@ -327,7 +284,6 @@ If the controller has stopped working, run:
 EOF
 }
 
-# ------------------------------------------------------------------- usb dump
 echo "------------------------------------------------------------------------"
 echo " Reading the controller over USB"
 echo "------------------------------------------------------------------------"
@@ -342,7 +298,6 @@ if [ $usb_rc -ne 0 ]; then
     echo "If the controller stops working, run:  ./rescue.sh"
 fi
 
-# ------------------------------------------------------------------- rom dump
 if [ "$DO_ROM" = "1" ]; then
     if [ ! -x "$BATCTRL" ]; then
         echo
@@ -369,14 +324,9 @@ EOF
 
         echo
         echo "---- Starting the dumper in watch mode ---------------------------------"
-        # The dumper starts first and polls, then power is cycled: the board is
-        # only in boot mode for a few seconds, and starting a program after
-        # entering boot mode loses that race.
         $PY "$LIB/ra4_boot_dump.py" --outdir "$WORKDIR" --wait 120 dump &
         dumper=$!
 
-        # Let Python import, self-audit and enter its poll loop before the
-        # board appears.
         sleep 3
 
         echo
@@ -384,9 +334,6 @@ EOF
         echo "(cycling until the dumper has it - keep holding)"
         echo
 
-        # Never cut off a live session. A free-running board drops off the bus a
-        # few seconds after it appears; if it is still there well past that,
-        # something is talking to it, and cycling power would kill the dump.
         HELD_SECONDS=6
         cycle=0
         while kill -0 "$dumper" 2>/dev/null; do
@@ -425,14 +372,11 @@ EOF
     fi
 fi
 
-# ---------------------------------------------------------------------- pack
 echo
 echo "------------------------------------------------------------------------"
 echo " Packing"
 echo "------------------------------------------------------------------------"
 
-# Fold the session record into the archive. tee is a separate process, so give
-# it a moment to catch up with what has just been written.
 sleep 1
 cp "$LOGFILE" "$WORKDIR/collect-log.txt" 2>/dev/null
 

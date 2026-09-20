@@ -80,10 +80,6 @@ report_state
 
 did_something=0
 
-# ---------------------------------------------- Valve bootloader mode (USB)
-# Handled first: it is the common case, it needs no buttons and no power
-# cycle, and on a two-board model it can be true of one MCU while the other
-# is fine.
 if boot_present; then
     echo "---- Leaving Valve bootloader mode -------------------------------------"
     python3 -u "$LIB/exit_bootloader.py"
@@ -91,9 +87,6 @@ if boot_present; then
     did_something=1
 fi
 
-# ------------------------------------------------ Renesas ROM boot mode
-# Only reachable by cutting the board's power, so it is a separate script and
-# it asks the operator to let go of the buttons first.
 if on_bus "$ROM_ID"; then
     echo "---- Leaving Renesas ROM boot mode -------------------------------------"
     if [ -x "$LIB/exit-boot-mode.sh" ]; then
@@ -105,9 +98,6 @@ if on_bus "$ROM_ID"; then
     did_something=1
 fi
 
-# ----------------------------------------------------- nothing on the bus
-# No controller in any mode. A power cycle is the only thing left to try from
-# here, and it is the same call the ROM recovery makes.
 if [ "$did_something" = "0" ] && ! app_present; then
     echo "---- No controller in any mode -----------------------------------------"
     echo
@@ -132,18 +122,10 @@ if [ "$did_something" = "0" ] && ! app_present; then
     fi
 fi
 
-# ---------------------------------------------------------------- outcome
 echo "------------------------------------------------------------------------"
 report_state
 
 if app_present && ! boot_present && ! on_bus "$ROM_ID"; then
-    # Everything this script can see is a USB state, and every USB state here
-    # is correct. That is NOT the same as the controller working: after a
-    # boot-mode pass the board drops off the bus and comes back, and Steam does
-    # not always re-attach to it. The controller is then present, running its
-    # own firmware, and dead to the user. Saying "nothing was wrong" at someone
-    # holding a dead controller is worse than saying nothing, so say which
-    # layer is confirmed good and where to look next.
     if [ "$did_something" = "1" ]; then
         echo "Recovered - the controller is running its own firmware again."
     else

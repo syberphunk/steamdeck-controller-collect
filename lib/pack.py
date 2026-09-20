@@ -46,8 +46,6 @@ def archive_name(detect, usb, rom):
         ts = (detect or {}).get('app_build_timestamps') or {}
         app_build = ts.get('primary')
 
-    # The bootloader stamp comes from whichever path actually read the
-    # bootloader region: USB on SAMD boards, the ROM path on RA4.
     bl_build = (rom or {}).get('bootloader_build') or ident.get('bootloader_build')
 
     dmi = host.get('dmi') or {}
@@ -242,7 +240,6 @@ def main():
     host = (usb or {}).get('host') or (detect or {}).get('host') or {}
     ident = dict((usb or {}).get('identity') or {})
 
-    # The bootloader build is whatever the successful path found.
     if (rom or {}).get('bootloader_build'):
         ident['bootloader_build'] = rom['bootloader_build']
     if not ident.get('app_build'):
@@ -277,8 +274,6 @@ def main():
 
     name = archive_name(detect, usb, rom)
 
-    # Name the images before anything is hashed or listed, so the manifest
-    # describes the files as they will actually be found in the archive.
     mapping = apply_prefix(workdir, name)
     for stage in (detect, usb, rom):
         if stage:
@@ -297,9 +292,6 @@ def main():
         'rom_dump': rom,
     }
 
-    # README first, then the listing again so README.txt is in it, then the
-    # manifest. manifest.json cannot list its own hash, and is the one file
-    # missing from the listing.
     write_readme(os.path.join(workdir, 'README.txt'), manifest, name)
     manifest['files'] = scan_files(workdir, skip=('manifest.json',))
     with open(os.path.join(workdir, 'manifest.json'), 'w') as fh:
@@ -316,7 +308,6 @@ def main():
     with tarfile.open(archive, 'w:gz') as tar:
         tar.add(final, arcname=os.path.basename(final))
 
-    # Hand ownership back so the results are usable without sudo.
     if args.owner:
         try:
             pw = pwd.getpwnam(args.owner)

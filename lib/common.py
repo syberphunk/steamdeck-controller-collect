@@ -21,17 +21,12 @@ PID_BOOTLOADER = 0x1004
 PID_APP_LEGACY = 0x1204          # pre-release units, 8 KB bootloader
 PID_BOOTLOADER_LEGACY = 0x1003
 
-# Renesas Standard Boot Firmware, used by the Type 3 ROM path.
 RA_BOOT_VID = 0x045b
 RA_BOOT_PID = 0x0261
 
 COLLECTOR_VERSION = '1.0.2'
 
 
-# --------------------------------------------------------------- transcript
-# Everything printed is also kept in memory so the archive carries a record of
-# the run. Progress bars are excluded: they are redrawn in place and would
-# otherwise fill the log with near-identical lines.
 TRANSCRIPT = []
 
 
@@ -57,7 +52,6 @@ def write_transcript(path, header):
         fh.write('\n'.join(TRANSCRIPT) + '\n')
 
 
-# ------------------------------------------------------------------ helpers
 def valve_crc(data):
     """Reflected CRC-32, poly 0x04C11DB7, init 0, no final xor.
 
@@ -101,18 +95,12 @@ def read_first_line(path):
         return None
 
 
-# ----------------------------------------------------------- variant catalog
 TYPE_NAMES = {
     1: 'Type 1 - D21_D21, two SAMD21, 16 KB bootloader',
     2: 'Type 2 - D2x_D21, SAMD21 primary plus SAMD20 or SAMD21 secondary',
     3: 'Type 3 - RA4, single Renesas RA4E1',
 }
 
-# Hardware ID -> (board description, primary chip, secondary chip or None).
-# IDs 26-32 are listed in /usr/bin/jupiter-controller-update and the HW_ID_*
-# constants in d20bootloader.py. 41 and 46 are Renesas boards observed on
-# hardware; Valve's table documents no RA4 IDs, and 41 shows the RA4 is not
-# OLED-only - it also shipped in later LCD units.
 HWID_BOARDS = {
     26: ('Steam Deck EV2 engineering unit (Jupiter)', 'samd21', 'samd21'),
     27: ('Steam Deck, original D21/D21 board (Jupiter)', 'samd21', 'samd21'),
@@ -143,9 +131,6 @@ def layout_for(major, legacy_pid=False):
             'app_end': 0x40000,
             'info_offset': 0x0800_0000,
             'blob_offset': 0x0800_0100,
-            # RA4E1 data flash is 8 KB. Valve's tooling uses only the first
-            # 4 KB; scan the whole region and let the readability map find the
-            # edge the device actually enforces.
             'data_flash': (0x0800_0000, 0x0800_2000),
         }
     app_start = 0x2000 if legacy_pid else 0x4000         # SAMD21, 8 or 16 KB BL
@@ -171,8 +156,6 @@ def identify(major, hwid, dmi_board):
     known = HWID_BOARDS.get(hwid)
     hwid_note = (f'hardware ID {hwid}' if hwid is not None
                  else 'hardware ID not read yet')
-    # Accept the table entry only if its chip family agrees with the USB type;
-    # a mismatch means the ID has been reused and the table would mislead.
     if known and (major != 3) == (known[1] != 'ra4e1'):
         return known
 
@@ -212,7 +195,6 @@ def bootloader_source(major):
     return 'usb'
 
 
-# ------------------------------------------------------------ USB detection
 def probe_usb():
     """Read the USB descriptors. Opens no device and changes nothing.
 
@@ -250,8 +232,6 @@ def probe_usb():
     out['in_bootloader'] = bool(pids & {PID_BOOTLOADER, PID_BOOTLOADER_LEGACY})
     out['legacy_pid'] = bool(pids & {PID_APP_LEGACY, PID_BOOTLOADER_LEGACY})
 
-    # Prefer the application interface: the bootloader reports the same major
-    # byte, but the app is the interface Valve's updater reads.
     for want in (PID_APP, PID_BOOTLOADER, PID_APP_LEGACY, PID_BOOTLOADER_LEGACY):
         for r in found:
             if r.get('product_id') == want and r.get('release_number'):
@@ -288,7 +268,6 @@ def usb_present(vid, pid):
     return False
 
 
-# --------------------------------------------------------------- host facts
 def host_info():
     """Model, OS and firmware-package identification for the Deck itself."""
     dmi = {}
@@ -296,9 +275,6 @@ def host_info():
                 'bios_version', 'product_version'):
         dmi[key] = read_first_line(f'/sys/class/dmi/id/{key}')
 
-    # Full serial. It names the unit, and the point of this archive is to be
-    # able to tie a controller's contents to the Deck it came out of. See
-    # PRIVACY.md.
     dmi['product_serial'] = read_first_line('/sys/class/dmi/id/product_serial')
     dmi['board_serial'] = read_first_line('/sys/class/dmi/id/board_serial')
 

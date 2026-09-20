@@ -43,8 +43,6 @@ def app_build_timestamps():
         sys.modules['valve_d21_ts'] = mod
         spec.loader.exec_module(mod)
         import hid
-        # Interface 2 is the control interface the helper expects; fall back to
-        # whatever enumerates if this build numbers them differently.
         devs = [d for d in hid.enumerate(VALVE_VID, PID_APP)
                 if d.get('interface_number') == 2] or \
             hid.enumerate(VALVE_VID, PID_APP)
@@ -113,10 +111,6 @@ def main():
     major = usb.get('major')
     dmi_board = read_first_line('/sys/class/dmi/id/board_name') or ''
 
-    # Hardware ID lives in the device-info partition, which is only reachable
-    # once the board is in bootloader mode. Detection deliberately stops short
-    # of that, so the board description here is by USB type only and is refined
-    # during the dump.
     board, chip_primary, chip_secondary = identify(major, None, dmi_board)
 
     result = {

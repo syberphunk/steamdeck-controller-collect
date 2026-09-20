@@ -52,37 +52,15 @@ from common import (COLLECTOR_VERSION, FW_DIR, TYPE_NAMES,  # noqa: E402
                     identify, layout_for, probe_usb, read_first_line, say,
                     sha256, strip_ff, valve_crc, write_transcript)
 
-# d20bootloader.read_32b() is fixed at 32 bytes.
-#
-# d21bootloader16._read_debug_data() does not stream either. Its `size`
-# argument only caps how much of the reply it accepts; the firmware serves
-# exactly one 32-byte report per request (the command is
-# DEBUG_READ_32B_THIS/_OTHER), then answers the next _get_feature_report with
-# len_ == 0 and the loop breaks. Valve's own read_blob() therefore loops
-# `for off in range(0, size, 32)`. Asking for more than 32 silently returns 32,
-# and the surplus would be invented bytes.
 BLOCK = 32
 
-# A patch of unreadable flash must not throw away the rest of the dump - the
-# regions of interest are at both ends of the address space. Only give up if
-# the device has clearly stopped answering, or the run is taking absurdly long.
 MAX_CONSECUTIVE_FAILS = 256
 TIME_BUDGET_S = 30 * 60
 
-# A refused read is a stalled control transfer, not a timeout, so it returns
-# immediately and retrying is cheap. On the RA4 a single refused transaction
-# can disturb the following one, so one stray failure must not condemn an
-# address.
 READ_RETRIES = 3
 
-# Coarse readability scan before committing to a long dump: one read per 4 KB
-# covers 256 KB in 64 transactions.
 SCAN_STEP = 4096
 
-# How many offsets to re-read afterwards and compare against the dump. The D20
-# read path returns a fixed-size slice with no error signalling, so a silent
-# mis-read cannot be caught at read time - only by reading the same address
-# twice.
 VERIFY_SAMPLES = 64
 
 
@@ -98,14 +76,10 @@ def bail(msg, code=1):
     sys.exit(code)
 
 
-# ------------------------------------------------------------------ safeguard
 class DestructiveCallBlocked(RuntimeError):
     """Raised if anything tries to reach a mutating API on the controller."""
 
 
-# Anything on Valve's objects that can change the device. The proxy is
-# allow-list based, so this set is a second line of defence rather than the
-# only one.
 FORBIDDEN = frozenset({
     'erase', 'erase_row', 'erase_partition', 'erase_all', 'chip_erase',
     'write_32b', 'write', 'upload', 'upload_blob', 'upload_firmware',
@@ -117,9 +91,6 @@ FORBIDDEN = frozenset({
     '_send_data', '_send_feature_report', '_complete_update',
 })
 
-# Names distinctive enough to grep the source for. Generic words such as
-# write/update/flash are excluded: `fh.write(...)` on an output file is not a
-# device call, and an audit that cries wolf is an audit nobody trusts.
 AUDIT_NAMES = frozenset({
     'erase', 'erase_row', 'erase_partition', 'erase_all', 'chip_erase',
     'write_32b', 'upload_blob', 'upload_firmware', 'upload_mte_blob',
@@ -140,12 +111,8 @@ class ReadOnlyDevice:
     """
 
     ALLOWED = frozenset({
-        # reading flash
         'read_32b', '_read_debug_data',
-        # lifecycle: bootloader entry is how reading works, reboot returns the
-        # controller to its normal application afterwards
         'reboot', 'close',
-        # read-only descriptive attributes
         'device_type', 'mcu',
         'FLASH_SIZE', 'FLASH_END', 'APP_FW_START', 'APP_FW_END',
         'APP_FW_INFO', 'APP_FW_LENGTH', 'INFO_OFFSET', 'BLOB_OFFSET',
@@ -158,9 +125,6 @@ class ReadOnlyDevice:
     def __init__(self, obj):
         object.__setattr__(self, '_obj', obj)
 
-    # __getattribute__, not __getattr__: the latter is consulted only when
-    # normal lookup fails, which would leave `proxy.__dict__` handing out the
-    # raw unguarded device object.
     def __getattribute__(self, name):
         if name == '__class__':                 # keep isinstance/repr sane
             return object.__getattribute__(self, name)
@@ -207,7 +171,6 @@ def self_audit():
     say(f'Self-audit clean: {checked} source files, none can erase or write.')
 
 
-# --------------------------------------------------------------------- loading
 def load_module(path, name):
     import importlib.util
     spec = importlib.util.spec_from_file_location(name, path)
@@ -234,8 +197,6 @@ class Backend:
                 return self._read_once(offset, length)
             except Exception as exc:                            # noqa: BLE001
                 last = exc
-                # Let the device finish resynchronising before deciding the
-                # address itself is at fault.
                 time.sleep(0.02 * (attempt + 1))
         raise last
 
@@ -243,9 +204,6 @@ class Backend:
         if self.kind == 'd20':
             data = self.obj.read_32b(offset)
         else:
-            # verbose=False suppresses the progress bar, which matters because
-            # there are thousands of these calls per MCU. The redirect guards
-            # against a noisier build of the Valve script.
             sink = io.StringIO()
             with redirect_stderr(sink), redirect_stdout(sink):
                 data = self.obj._read_debug_data(self.code, size=length,
@@ -253,8 +211,6 @@ class Backend:
         if not data:
             raise IOError(f'empty read at 0x{offset:08X}')
         data = bytes(data[:length])
-        # A short read is a failed read, not a partial success. Padding it
-        # would manufacture bytes indistinguishable from erased flash.
         if len(data) != length:
             raise IOError(f'short read at 0x{offset:08X}: asked {length} bytes, '
                           f'got {len(data)}')
@@ -271,8 +227,6 @@ class Backend:
 def open_type1(d21_path, notes, legacy_pid):
     """D21_D21. One USB endpoint, two MCUs addressed as THIS and OTHER."""
     if legacy_pid:
-        # d21bootloader16.py reads these at import time, so they must be set
-        # before the module is loaded.
         os.environ.setdefault('APP_FW_START', '0x2000')
         os.environ.setdefault('JUPITER_USB_PID', '0x1204')
         os.environ.setdefault('JUPITER_BOOTLOADER_USB_PID', '0x1003')
@@ -312,8 +266,6 @@ def open_type23(d20_path, major, notes):
                      'generation has a single MCU')
         return targets
 
-    # A secondary exists on D2x_D21 only. Valve raises NotSupported otherwise,
-    # and opening it anyway yields a bogus duplicate of the primary.
     try:
         sec = ReadOnlyDevice(mod.DogBootloader(mcu=mcu_enum.SECONDARY))
         targets.append(Backend('d20', mod, sec, 'secondary-left', 'secondary'))
@@ -343,7 +295,6 @@ def open_targets(usb, notes):
         notes.append('USB release number unreadable: '
                      + (usb.get('error') or 'no controller interfaces found'))
 
-    # Valve's rule first, then the other tool as a fallback.
     attempts = []
     if major == 1 and os.path.exists(d21_path):
         attempts.append(('d21', d21_path))
@@ -378,11 +329,6 @@ def open_targets(usb, notes):
     return [], major
 
 
-# --------------------------------------------------- known-unserved regions
-# Ranges a board family is known in advance not to serve on the interface its
-# own firmware provides. Presentation only - nothing here changes what is read
-# or what the manifest records. It exists so a run that goes exactly to plan
-# does not report itself in the language of failure.
 EXPECTED_UNSERVED = []
 
 
@@ -408,7 +354,6 @@ def expected_refusal(start, end):
     return None
 
 
-# ---------------------------------------------------------- pre-flight probing
 def readable(backend, off):
     try:
         backend.read(off)
@@ -448,8 +393,6 @@ def map_regions(backend, start, end, label):
     while off < end:
         samples.append((off, readable(backend, off)))
         off += SCAN_STEP
-    # Always test the final block: a range ending mid-step would otherwise be
-    # judged by a sample that is not inside it.
     tail = end - BLOCK
     if samples and tail > samples[-1][0]:
         samples.append((tail, readable(backend, tail)))
@@ -472,16 +415,12 @@ def map_regions(backend, start, end, label):
         if ok:
             note = 'readable'
         else:
-            # A refusal that was predicted from the board type is the normal
-            # answer, not a fault. Shouting REFUSED at every one of them makes
-            # a textbook run look like a failing one.
             why = expected_refusal(s, e)
             note = f'not served here - {why}' if why else 'REFUSED by the controller'
         say(f'   {label} 0x{s:08X}-0x{e:08X}  {note}')
     return [tuple(s) for s in spans]
 
 
-# --------------------------------------------------------------------- the dump
 def merge_gaps(gaps):
     out = []
     for off, n in sorted(gaps):
@@ -510,10 +449,6 @@ def dump_region(backend, start, end, label, depth=0):
         if len(data) >= e - s:
             result.append((s, e, True))
             continue
-        # The span stopped early. A coarse scan can miss a refused patch that
-        # starts mid-step, so re-map what is left rather than writing off the
-        # remainder: on a controller that refuses one region, the regions after
-        # it are usually fine.
         rest = s + len(data)
         if rest > s:
             result.append((s, rest, True))
@@ -546,16 +481,11 @@ def dump_range(backend, start, end, description):
             consecutive = 0
         except Exception:                                       # noqa: BLE001
             consecutive += 1
-            # Merge with the previous gap if adjacent, so a long bad patch is
-            # one entry rather than hundreds.
             if gaps and gaps[-1][0] + gaps[-1][1] == off:
                 gaps[-1] = (gaps[-1][0], gaps[-1][1] + n)
             else:
                 gaps.append((off, n))
             chunk = b'\xff' * n            # placeholder, but recorded in gaps
-        # backend.read() guarantees exactly n bytes or raises, and the failure
-        # placeholder above is exactly n. Anything else is a bug here, and
-        # padding it would forge flash contents.
         if len(chunk) != n:
             raise AssertionError(f'internal error: {len(chunk)} bytes for a '
                                  f'{n}-byte read at 0x{off:08X}')
@@ -615,7 +545,6 @@ def verify_sample(backend, data, start, gaps):
             'offsets': examples}
 
 
-# --------------------------------------------------------------------- analysis
 def app_crc_check(data, lay):
     """Recompute the stored application CRC exactly as the bootloader does."""
     info_off = lay['app_end'] - 4
@@ -677,7 +606,6 @@ def vectors_ok(data, at=0):
     return 0x20000000 <= sp <= 0x20100000 and bool(reset & 1)
 
 
-# -------------------------------------------------------------------- API facts
 def collect_api_info(backend, major=None):
     """Everything the bootloader will state about itself. All best-effort.
 
@@ -688,9 +616,6 @@ def collect_api_info(backend, major=None):
     fields = ['device_type', 'hardware_id', 'board_serial', 'unit_serial',
               'bootloader_reason', 'bl_firmware_build_time',
               'firmware_build_time', 'unique_id', 'user_row', 'state']
-    # user_row reads NVMCTRL_AUX0_ADDRESS, a SAMD-only register. Valve's code
-    # skips it for DeviceType.RA4; asking an RA4 for 0x00804000 gets the
-    # transfer refused and can disturb the following read.
     if major == 3:
         fields.remove('user_row')
     out = {}
@@ -703,11 +628,6 @@ def collect_api_info(backend, major=None):
         if val is None or callable(val):
             continue
         try:
-            # d21bootloader16 exposes genuinely per-side values as
-            # (this, other) tuples: hardware_id, board_serial,
-            # bootloader_reason, unique_id, user_row, state. The scalars it
-            # returns (unit_serial, firmware_build_time) come from THIS only,
-            # so attributing them to the secondary would be wrong.
             if isinstance(val, tuple) and len(val) == 2 and backend.kind == 'd21':
                 val = val[idx]
             elif backend.kind == 'd21' and backend.side == 'secondary':
@@ -730,7 +650,6 @@ def collect_api_info(backend, major=None):
     return out
 
 
-# ------------------------------------------------------------------- reporting
 def assessment(records):
     """State what was captured, without judging whether it is wanted."""
     if any(r['verdict'].startswith('suspect') for r in records):
@@ -749,9 +668,6 @@ def assessment(records):
     bits = [f'{len(got)} MCU(s) read']
     if any(r['verdict'] == 'bootloader captured' for r in got):
         bits.append('bootloader region included')
-    # This line is printed at the end of the USB pass, which on an RA4 is the
-    # first of two. Worded as a final tally it reads as a failed run when the
-    # bootloader is about to be collected by the pass that follows.
     all_gaps = [g for r in got for g in r.get('gaps', [])]
     missing = sum(n for _, n in all_gaps)
     if any(r['verdict'].startswith('app only') for r in got):
@@ -771,7 +687,6 @@ def rename_if_free(src, dst):
     return dst
 
 
-# ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description='Read controller flash over USB.')
     ap.add_argument('--outdir', required=True,
@@ -868,9 +783,6 @@ def main():
         else:
             say(f'   >> {ver["checked"]} sampled addresses re-read identically.')
 
-        # Count blankness over what was actually read. Including a refused
-        # region would report placeholder 0xFF as erased flash and trip the
-        # suspect-dump check below on a perfectly good dump.
         got = sum(e - s for s, e, ok in spans
                   if ok and s < lay['flash_start'] + lay['flash_size']) \
             - sum(n for _, n in gaps)
@@ -879,10 +791,6 @@ def main():
         blank = min(max(blank, 0.0), 100.0)
         bl_readable = any(ok and s <= lay['flash_start'] < e for s, e, ok in spans)
 
-        # A vector table at 0x0 attests to the first eight bytes only. If that
-        # signal disagrees with an almost entirely blank flash, a mis-read is
-        # far likelier than a working controller running from erased flash, so
-        # say so rather than reporting a confident wrong verdict.
         vok = vectors_ok(data) and bl_readable
         if vok and blank > 90:
             verdict = 'suspect - implausibly blank'
@@ -936,7 +844,6 @@ def main():
             say('   -- It is held as 0xFF and listed, range by range, in the')
             say('   -- manifest, so a short read is never taken for erased flash.')
 
-    # ---- hand the controller back ------------------------------------------
     say()
     say('Returning the controller to normal...')
     seen = set()
@@ -946,7 +853,6 @@ def main():
             b.close()
     time.sleep(2)
 
-    # ---- establish what this board is --------------------------------------
     hwid = None
     for r in records:
         di = r.get('device_info') or {}
@@ -982,14 +888,11 @@ def main():
     for r in records:
         r['chip'] = chip_primary if r.get('side') == 'primary' else \
             (chip_secondary or chip_primary)
-        # If the secondary reports its own hardware ID, believe it over the
-        # table lookup - that is the point of a hybrid board.
         di = r.get('device_info') or {}
         own = HWID_BOARDS.get(di.get('hw_id'))
         if r.get('side') == 'secondary' and own:
             r['chip'] = own[1]
 
-    # ---- name and write the carved regions ---------------------------------
     def add_file(rec, suffix, payload):
         name = f'{rec["label"]}-{rec["chip"]}-{suffix}.bin'
         path = os.path.join(outdir, name)
@@ -1029,8 +932,6 @@ def main():
                 base = lay['data_flash'][0]
                 add_file(r, 'devinfo', df[lay['info_offset'] - base:
                                           lay['info_offset'] - base + 256])
-                # One logical partition. The rest of the region is already in
-                # the dataflash image.
                 add_file(r, 'unit-blob', df[lay['blob_offset'] - base:
                                             lay['blob_offset'] - base + 256])
         else:
@@ -1039,7 +940,6 @@ def main():
             add_file(r, 'unit-blob', data[lay['blob_offset']:
                                           lay['blob_offset'] + 256])
 
-    # ---- identity used for naming the archive ------------------------------
     primary = next((r for r in records if r.get('side') == 'primary'), None)
     di = (primary or {}).get('device_info') or {}
     bt = (primary or {}).get('build_times') or {}

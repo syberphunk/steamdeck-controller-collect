@@ -1,23 +1,9 @@
 #!/bin/bash
-# Take the controller board OUT of Renesas ROM boot mode and hand it back to
-# SteamOS. Run this any time the controller has stopped working after a dump.
-#
-# THE CONTROLLER IS NOT BRICKED. Completing the boot ROM handshake is what keeps
-# the ROM alive: per R01AN5562 section 4.3 it then waits in an infinite loop
-# rather than resetting, so the board stays at 045b:0261 until its power is cut.
-# SteamOS sees no controller because the ROM is running instead of the normal
-# application firmware. Nothing has been written or erased - ra4-boot-dump has
-# no erase or write command to send.
-#
-# The only action here is BatCtrl SetCBPower, exactly as Valve's own
-# rfp_cli_linux.sh does it. It touches no flash.
 
 set -uo pipefail
 
 FWDIR=/usr/share/jupiter_controller_fw_updater/RA_bootloader_updater
 BATCTRL="$FWDIR/linux_host_tools/BatCtrl"
-# Overridable so the recovery path can be exercised against a device that is
-# already on the bus, without needing a board actually stuck in boot mode.
 BOOT_ID=${BOOT_ID:-045b:0261}      # Renesas RA USB Boot - the ROM
 CTRL_ID=${CTRL_ID:-28de:1205}      # Valve Steam Controller - normal firmware
 TRIES=${TRIES:-3}
@@ -76,8 +62,6 @@ for attempt in $(seq 1 "$TRIES"); do
     sleep 1
     "$BATCTRL" SetCBPower 1 >/dev/null 2>&1
 
-    # ~2.4 s to enumerate at the best of times (R01AN5562 8.1 gives up to
-    # 2613 ms of initial setting time), so do not judge it early.
     for _ in $(seq 1 100); do          # up to 10 s
         if on_bus "$CTRL_ID"; then
             echo
