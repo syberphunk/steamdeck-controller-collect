@@ -966,6 +966,17 @@ def main():
                 hwid = v
                 break
 
+    for r in records:
+        di = r.get('device_info') or {}
+        if di.get('crc_valid') is False:
+            say(f'   {r["label"]}: the device-info record does not match its '
+                f'own checksum.')
+            say('   Its hardware ID and serial numbers are still readable and '
+                'are recorded,')
+            say('   but the firmware rejects this record and uses a built-in '
+                'hardware ID')
+            say('   instead. Nothing here changed it - this pass only reads.')
+
     dmi_board = read_first_line('/sys/class/dmi/id/board_name') or ''
     board, chip_primary, chip_secondary = identify(major, hwid, dmi_board)
     for r in records:
@@ -1051,6 +1062,7 @@ def main():
             'secondary_chip': chip_secondary,
             'board_serial': di.get('board_serial') or None,
             'unit_serial': di.get('unit_serial') or None,
+            'device_info_crc_valid': di.get('crc_valid'),
             'app_build': bt.get('app'),
             'bootloader_build': bt.get('bootloader'),
         },

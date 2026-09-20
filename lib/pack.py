@@ -149,7 +149,9 @@ def write_readme(path, manifest, stem=''):
 
         w('Controller\n----------\n')
         w(f'  type             {ident.get("type_name")}\n')
-        w(f'  hardware ID      {ident.get("hw_id")}\n')
+        bad_record = ident.get('device_info_crc_valid') is False
+        w(f'  hardware ID      {ident.get("hw_id")}'
+          f'{"  (SEE BELOW - not trustworthy)" if bad_record else ""}\n')
         w(f'  board            {ident.get("board")}\n')
         w(f'  primary MCU      {ident.get("primary_chip")}\n')
         w(f'  secondary MCU    {ident.get("secondary_chip") or "none - single MCU"}\n')
@@ -157,6 +159,21 @@ def write_readme(path, manifest, stem=''):
         w(f'  unit serial      {ident.get("unit_serial")}\n')
         w(f'  app build        {ident.get("app_build")}\n')
         w(f'  bootloader build {ident.get("bootloader_build")}\n\n')
+
+        if bad_record:
+            w('  ! The device-info record failed its own CRC check.\n'
+              '!\n'
+              '!   The hardware ID and both serial numbers above were read\n'
+              '!   straight out of that record, so they are what is stored,\n'
+              '!   not what the controller accepts. The running firmware\n'
+              '!   rejects this record and substitutes a built-in hardware\n'
+              '!   ID of its own, which looks like an ordinary ID and gives\n'
+              '!   no sign that anything is wrong.\n'
+              '!\n'
+              '!   Nothing here caused it - this capture is read-only and\n'
+              '!   the record was already in this state. But do not treat\n'
+              '!   this capture as evidence of what hardware ID a board of\n'
+              '!   this type carries.\n\n'.replace('\n!', '\n  !'))
 
         w('What was captured\n-----------------\n')
         for line in manifest.get('captured') or ['(nothing)']:
